@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Live Stream Viewer</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/hls.js/1.4.12/hls.min.js"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            font-family: Arial, sans-serif;
+            background: #f0f0f0;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        .stream-container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        video {
+            width: 100%;
+            max-height: 720px;
+            background: #000;
+        }
+        .stream-info {
+            margin-top: 10px;
+            padding: 10px;
+            background: #f8f8f8;
+            border-radius: 4px;
+        }
+        .status {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 14px;
+            margin-left: 10px;
+        }
+        .online {
+            background: #4CAF50;
+            color: white;
+        }
+        .offline {
+            background: #f44336;
+            color: white;
+        }
+        #streams {
+            margin-top: 20px;
+        }
+        .stream-item {
+            padding: 10px;
+            margin-bottom: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="stream-container">
+            <h2>Live Stream <span id="streamStatus" class="status offline">Offline</span></h2>
+            <video id="video" controls playsinline></video>
+            <div class="stream-info">
+                <p>Stream URL: <span id="streamUrl"></span></p>
+                <p>Status: <span id="streamDetails">Checking stream status...</span></p>
+            </div>
+        </div>
+        <div id="streams">
+            <h3>Active Streams</h3>
+            <!-- Active streams will be listed here -->
+        </div>
+    </div>
+
+    <script>
+        const video = document.getElementById('video');
+        const baseUrl = window.location.hostname;
+        const streamUrl = `http://${baseUrl}:8000/live/stream/index.m3u8`;
+        document.getElementById('streamUrl').textContent = streamUrl;
+
+        // Initialize HLS.js
+        if (Hls.isSupported()) {
+            const hls = new Hls({
+                debug: false,
+                enableWorker: true,
+                lowLatencyMode: true,
+                backBufferLength: 90
+            });
+            
+            hls.attachMedia(video);
+            hls.on(Hls.Events.MEDIA_ATTACHED, function () {
+                hls.loadSource(streamUrl);
+            });
+
+            hls.on(Hls.Events.ERROR, function (event, data) {
+                if (data.fatal) {
+                    switch (data.type) {
+                        case Hls.ErrorTypes.NETWORK_ERROR:
+                            document.getElementById('streamStatus').className = 'status offline';
+                            document.getElementById('streamDetails').textContent = 'Network error - stream may be offline';
+                            setTimeout(() => hls.loadSource(streamUrl), 5000);
+                            break;
+                        case Hls.ErrorTypes.MEDIA_ERROR:
+                            hls.recoverMediaError();
+                            break;
+                        default:
+                            hls.destroy();
+                            break;
+                    }
+                }
+            });
+
+            hls.on(Hls.Events.MANIFEST_PARSED, function() {
+                document.getElementById('streamStatus').className = 'status online';
+                document.getElementById('streamDetails').textContent = 'Stream is online';
+                video.play().catch(function(error) {
+                    console.log("Play failed:", error);
+                });
+            });
+        }
+
+        // Fetch active streams
+        function updateStreams() {
+            fetch(`http://${baseUrl}:3000/api/streams`)
+                .then(response => response.json())
+                .then(data => {
+                    const streamsDiv = document.getElementById('streams');
+                    const streamsList = Object.entries(data).map(([key, value]) => {
+                        return `
+                            <div class="stream-item">
+                                <strong>Stream: ${key}</strong>
+                                <p>Viewers: ${value.subscribers || 0}</p>
+                                <p>Duration: ${Math.floor((Date.now() - value.startTime) / 1000)}s</p>
+                            </div>
+                        `;
+                    }).join('');
+                    
+                    if (streamsList) {
+                        streamsDiv.innerHTML = `<h3>Active Streams</h3>${streamsList}`;
+                    } else {
+                        streamsDiv.innerHTML = '<h3>Active Streams</h3><p>No active streams</p>';
+                    }
+                })
+                .catch(error => {
+                    console.error('Error fetching streams:', error);
+                });
+        }
+
+        // Update streams list every 5 seconds
+        setInterval(updateStreams, 5000);
+        updateStreams();
+    </script>
+</body>
+</html>
